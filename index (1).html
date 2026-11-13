@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ley de Ohm en RA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: full-screen 3D/AR stage, status bar on top, instrument panel docked at the bottom */
+:root {
+  --bg: #0c1215;
+  --panel: rgba(12, 19, 22, 0.86);
+  --panel-line: rgba(180, 220, 215, 0.14);
+  --fg: #e9f2f0;
+  --muted: #94aaa6;
+  --amber: #ffb648;
+  --electron: #5cc8ff;
+  --ok: #6fdc9a;
+  --font-d: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --font-b: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-m: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-b); overflow: hidden; -webkit-tap-highlight-color: transparent; }
+#camVideo { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+#overlay {
+  position: fixed; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 12px;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+}
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; }
+.brand { pointer-events: auto; }
+.eyebrow { font: 500 11px/1 var(--font-m); letter-spacing: .14em; text-transform: uppercase; color: var(--amber); }
+.brand h1 { margin: 4px 0 0; font: 700 22px/1 var(--font-d); letter-spacing: -.01em; text-shadow: 0 1px 8px rgba(0,0,0,.6); }
+.status-wrap { display: flex; gap: 8px; align-items: center; pointer-events: auto; flex-wrap: wrap; }
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: var(--panel); border: 1px solid var(--panel-line); font-size: 13px; max-width: 100%; backdrop-filter: blur(8px); }
+.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.status[data-state="search"] .dot { background: var(--amber); animation: pulse 1s ease-in-out infinite; }
+.status[data-state="found"] .dot, .status[data-state="placed"] .dot { background: var(--ok); }
+@keyframes pulse { 50% { opacity: .25; } }
+
+.panel {
+  pointer-events: auto; align-self: center; width: 100%; max-width: 560px; box-sizing: border-box;
+  background: var(--panel); border: 1px solid var(--panel-line); border-radius: 16px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; backdrop-filter: blur(10px);
+}
+.readout { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.readout .big { display: flex; flex-direction: column; gap: 2px; }
+.label { font: 500 11px/1 var(--font-m); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+#iOut { font: 700 30px/1 var(--font-d); color: var(--electron); font-variant-numeric: tabular-nums; }
+.formula { font: 500 13px/1.4 var(--font-m); color: var(--fg); flex: 1; min-width: 160px; }
+.formula small { display: block; color: var(--muted); font-size: 11px; }
+.controls { display: flex; flex-direction: column; gap: 12px; }
+.panel.collapsed .controls { display: none; }
+.ctl { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: baseline; }
+.ctl span { font-weight: 600; font-size: 14px; }
+.ctl output { font: 500 15px/1 var(--font-m); color: var(--amber); font-variant-numeric: tabular-nums; }
+.ctl input { grid-column: 1 / -1; }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; margin: 0; }
+input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--amber) var(--p, 50%), rgba(255,255,255,.14) var(--p, 50%)); }
+input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,.14); }
+input[type=range]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--amber); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -8px; border-radius: 50%; background: var(--fg); border: 3px solid var(--amber); }
+input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--fg); border: 3px solid var(--amber); }
+input[type=range]:focus-visible { outline: 2px solid var(--electron); outline-offset: 2px; border-radius: 4px; }
+
+.meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.meter { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.meter .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--electron); transition: width .15s; }
+.bar.amber i { background: var(--amber); }
+.flux { margin: 0; font-size: 12px; color: var(--muted); }
+.flux b { color: var(--fg); font-family: var(--font-m); font-weight: 500; }
+
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+button { font: 600 14px/1 var(--font-b); color: var(--fg); background: rgba(255,255,255,.08); border: 1px solid var(--panel-line); border-radius: 10px; padding: 11px 14px; cursor: pointer; }
+button:hover { background: rgba(255,255,255,.14); }
+button:focus-visible { outline: 2px solid var(--electron); outline-offset: 2px; }
+button.primary { background: var(--amber); color: #1b1203; border-color: transparent; flex: 1; }
+button.primary:hover { background: #ffc66e; }
+button.primary:disabled { background: rgba(255,255,255,.1); color: var(--muted); cursor: not-allowed; }
+#placeBtn { background: var(--ok); color: #06210f; border-color: transparent; }
+.ghost { padding: 8px 10px; font-size: 12px; }
+@media (max-width: 420px) { #iOut { font-size: 26px; } .brand h1 { font-size: 19px; } }
+@media (prefers-reduced-motion: reduce) { .status .dot { animation: none !important; } .bar i { transition: none; } }
+</style>
+</head>
+<body>
+<video id="camVideo" playsinline muted autoplay hidden></video>
+<canvas id="scene" aria-label="Circuito 3D con batería, resistencia y bombillo"></canvas>
+
+<div id="overlay">
+  <header class="top">
+    <div class="brand">
+      <div class="eyebrow">Ley de Ohm · Realidad aumentada</div>
+      <h1>V = I · R</h1>
+    </div>
+    <div class="status-wrap" id="topControls">
+      <div class="status" id="status" data-state="idle"><span class="dot"></span><span id="statusText">Cargando…</span></div>
+      <button id="placeBtn" hidden>Colocar aquí</button>
+    </div>
+  </header>
+
+  <section class="panel" id="panel">
+    <div class="readout">
+      <div class="big"><span class="label">Corriente</span><output id="iOut">0.24 A</output></div>
+      <div class="formula">I = V ÷ (R + R<sub>b</sub>)<small>R<sub>b</sub> = 5 Ω (filamento del bombillo)</small></div>
+      <button id="collapseBtn" class="ghost" aria-expanded="true">Ocultar</button>
+    </div>
+    <div class="controls">
+      <label class="ctl" for="vSlider"><span>Voltaje de la batería</span><output id="vOut">6.0 V</output>
+        <input type="range" id="vSlider" min="1" max="12" step="0.01" value="6"></label>
+      <label class="ctl" for="rSlider"><span>Resistencia</span><output id="rOut">20.0 Ω</output>
+        <input type="range" id="rSlider" min="1" max="100" step="0.1" value="20"></label>
+      <div class="meters">
+        <div class="meter"><span class="label">Velocidad e⁻</span><div class="bar"><i id="mSpeed"></i></div></div>
+        <div class="meter"><span class="label">Intensidad e⁻</span><div class="bar"><i id="mFlow"></i></div></div>
+        <div class="meter"><span class="label">Brillo</span><div class="bar amber"><i id="mBright"></i></div></div>
+      </div>
+      <p class="flux" id="flux"></p>
+    </div>
+    <div class="actions">
+      <button id="arBtn" class="primary" disabled>Comprobando RA…</button>
+      <button id="resetBtn" hidden>Reubicar circuito</button>
+      <button id="exitBtn" hidden>Salir de RA</button>
+    </div>
+  </section>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------- Física ---------- */
+const RB = 5, VMIN = 1, VMAX = 12, RMIN = 1, RMAX = 100;
+const IMAX = VMAX / (RMIN + RB), IMIN = VMIN / (RMAX + RB);
+const PMAX = IMAX * IMAX * RB;
+const E_CHARGE = 1.602e-19;
+const state = { V: 6, R: 20, I: 0, speed: 0, count: 0, bright: 0 };
+
+/* ---------- Escena ---------- */
+const canvas = $('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.xr.enabled = true;
+
+const scene = new THREE.Scene();
+const BG = new THREE.Color(0x0c1215);
+scene.background = BG;
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 30);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.minDistance = 0.2; controls.maxDistance = 1.5;
+controls.maxPolarAngle = Math.PI * 0.48;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x2a3236, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(0.4, 1, 0.5);
+scene.add(sun);
+
+/* Mesa para la vista 3D (se oculta en RA) */
+const floor = new THREE.Group();
+const floorDisc = new THREE.Mesh(new THREE.CircleGeometry(1.4, 64), new THREE.MeshStandardMaterial({ color: 0x141d21, roughness: 0.95 }));
+floorDisc.rotation.x = -Math.PI / 2; floorDisc.position.y = -0.0101;
+const grid = new THREE.GridHelper(2.4, 48, 0x2a3a3f, 0x1c272b);
+grid.position.y = -0.0099;
+floor.add(floorDisc, grid);
+scene.add(floor);
+
+function radialTexture(stops, size = 256) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  stops.forEach(([o, col]) => grd.addColorStop(o, col));
+  g.fillStyle = grd; g.fillRect(0, 0, size, size);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+/* ---------- Circuito ---------- */
+const circuit = new THREE.Group();
+scene.add(circuit);
+
+// Sombra suave y tablero
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.42),
+  new THREE.MeshBasicMaterial({ map: radialTexture([[0, 'rgba(0,0,0,0.55)'], [0.6, 'rgba(0,0,0,0.25)'], [1, 'rgba(0,0,0,0)']]), transparent: true, depthWrite: false }));
+shadow.rotation.x = -Math.PI / 2; shadow.position.y = -0.0098;
+circuit.add(shadow);
+const board = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.01, 0.26),
+  new THREE.MeshStandardMaterial({ color: 0x3a4d52, roughness: 0.75, metalness: 0.05 }));
+board.position.y = -0.005;
+circuit.add(board);
+
+// Trayectoria del circuito (sentido real de los electrones: del borne negativo al positivo)
+const H = 0.0065, BY = 0.013;
+const P = [
+  [-0.15, BY, 0.040],  // 0 borne negativo
+  [-0.15, H, 0.056],
+  [-0.15, H, 0.100],
+  [0.15, H, 0.100],
+  [0.15, H, 0.022],    // 4 entra al portalámparas
+  [0.15, H, -0.022],   // 5 sale del portalámparas
+  [0.15, H, -0.100],
+  [0.026, H, -0.100],  // 7 entra a la resistencia
+  [-0.026, H, -0.100], // 8 sale de la resistencia
+  [-0.15, H, -0.100],
+  [-0.15, H, -0.058],
+  [-0.15, BY, -0.042], // 11 borne positivo
+].map((p) => new THREE.Vector3(...p));
+const hiddenAfter = new Set([4, 7, 11]); // tramos dentro de bombillo, resistencia y batería
+const segs = []; let L = 0;
+for (let i = 0; i < P.length; i++) {
+  const a = P[i], b = P[(i + 1) % P.length], len = a.distanceTo(b);
+  segs.push({ a, b, len, cum: L, hidden: hiddenAfter.has(i) }); L += len;
+}
+function pointAt(s, out) {
+  s = ((s % L) + L) % L;
+  for (const g of segs) {
+    if (s <= g.cum + g.len) { out.lerpVectors(g.a, g.b, (s - g.cum) / g.len); return g.hidden; }
+  }
+  out.copy(P[0]); return true;
+}
+
+// Cables: aislante translúcido para ver los electrones por dentro
+function wire(points, color) {
+  const path = new THREE.CurvePath();
+  for (let i = 0; i < points.length - 1; i++) path.add(new THREE.LineCurve3(points[i], points[i + 1]));
+  const geo = new THREE.TubeGeometry(path, 400, 0.0048, 14, false);
+  const mat = new THREE.MeshPhysicalMaterial({ color, transparent: true, opacity: 0.38, roughness: 0.25, clearcoat: 0.6, depthWrite: false });
+  const m = new THREE.Mesh(geo, mat); m.renderOrder = 2; return m;
+}
+circuit.add(wire(P.slice(0, 5), 0x6d7a80));
+circuit.add(wire(P.slice(5, 8), 0xd8453b));
+circuit.add(wire(P.slice(8, 12), 0xd8453b));
+
+const metal = new THREE.MeshStandardMaterial({ color: 0xd4d8dc, metalness: 1, roughness: 0.28 });
+const brass = new THREE.MeshStandardMaterial({ color: 0xc9a55a, metalness: 1, roughness: 0.35 });
+
+// Batería cilíndrica lisa, sin marcas, acostada sobre el eje z (positivo hacia -z)
+const battery = new THREE.Group();
+battery.position.set(-0.15, BY, 0);
+battery.rotation.x = Math.PI / 2; // y local -> z global
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0x24303a, metalness: 0.55, roughness: 0.32 });
+const bBody = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.07, 48), bodyMat);
+const capA = new THREE.Mesh(new THREE.CylinderGeometry(0.0122, 0.0122, 0.003, 48), metal); capA.position.y = -0.0362;
+const capB = new THREE.Mesh(new THREE.CylinderGeometry(0.0122, 0.0122, 0.003, 48), metal); capB.position.y = 0.0362;
+const nub = new THREE.Mesh(new THREE.CylinderGeometry(0.0048, 0.0052, 0.0035, 32), metal); nub.position.y = -0.0392;
+const rimA = new THREE.Mesh(new THREE.TorusGeometry(0.0128, 0.0009, 10, 48), metal); rimA.rotation.x = Math.PI / 2; rimA.position.y = -0.035;
+const rimB = rimA.clone(); rimB.position.y = 0.035;
+battery.add(bBody, capA, capB, nub, rimA, rimB);
+circuit.add(battery);
+// Contactos de latón donde llegan los cables
+for (const z of [0.0425, -0.0435]) {
+  const tab = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.022, 0.0015), brass);
+  tab.position.set(-0.15, 0.011, z); circuit.add(tab);
+}
+
+// Resistencia de película de carbón con bandas de color reales
+const resistor = new THREE.Group();
+resistor.position.set(0, 0.0068, -0.1);
+resistor.rotation.z = -Math.PI / 2; // y local -> x global
+const prof = [[0, -0.02], [0.0035, -0.02], [0.006, -0.0188], [0.0066, -0.0155], [0.0063, -0.0115], [0.0056, -0.0095], [0.0056, 0.0095], [0.0063, 0.0115], [0.0066, 0.0155], [0.006, 0.0188], [0.0035, 0.02], [0, 0.02]]
+  .map(([r, y]) => new THREE.Vector2(r, y));
+resistor.add(new THREE.Mesh(new THREE.LatheGeometry(prof, 48), new THREE.MeshStandardMaterial({ color: 0xdcc597, roughness: 0.55 })));
+const bandDefs = [[-0.0148, 0.00675], [-0.0065, 0.0058], [0.0005, 0.0058], [0.0145, 0.00675]];
+const bandMats = bandDefs.map(([y, r]) => {
+  const m = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.45 });
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.0028, 48), m);
+  band.position.y = y; resistor.add(band); return m;
+});
+bandMats[3].color.set(0xc9a227); bandMats[3].metalness = 0.8; bandMats[3].roughness = 0.3;
+for (const s of [-1, 1]) {
+  const lead = new THREE.Mesh(new THREE.CylinderGeometry(0.0008, 0.0008, 0.008, 12), metal);
+  lead.position.y = s * 0.0235; resistor.add(lead);
+}
+circuit.add(resistor);
+const DIGIT = [0x151515, 0x6b3a1e, 0xc62828, 0xef6c00, 0xf2cf1d, 0x2e7d32, 0x1565c0, 0x7b1fa2, 0x8a8a8a, 0xf2f2f2];
+const MULT = { '-1': 0xc9a227, 0: 0x151515, 1: 0x6b3a1e, 2: 0xc62828 };
+function setBands(R) {
+  let exp = Math.floor(Math.log10(R)) - 1;
+  let sig = Math.round(R / 10 ** exp);
+  if (sig >= 100) { sig = Math.round(sig / 10); exp++; }
+  bandMats[0].color.set(DIGIT[Math.floor(sig / 10)]);
+  bandMats[1].color.set(DIGIT[sig % 10]);
+  bandMats[2].color.set(MULT[exp] ?? 0x151515);
+  const isGold = exp === -1;
+  bandMats[2].metalness = isGold ? 0.8 : 0; bandMats[2].roughness = isGold ? 0.3 : 0.45;
+}
+
+// Etiqueta flotante con el valor de la resistencia
+const labelCanvas = document.createElement('canvas'); labelCanvas.width = 320; labelCanvas.height = 112;
+const labelTex = new THREE.CanvasTexture(labelCanvas); labelTex.colorSpace = THREE.SRGBColorSpace;
+const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTex, depthTest: false, transparent: true }));
+label.scale.set(0.064, 0.0224, 1); label.position.set(0, 0.034, -0.1); label.renderOrder = 5;
+circuit.add(label);
+function drawLabel(text) {
+  const g = labelCanvas.getContext('2d');
+  g.clearRect(0, 0, 320, 112);
+  g.fillStyle = 'rgba(12,19,22,0.82)';
+  g.beginPath(); g.roundRect(6, 6, 308, 100, 50); g.fill();
+  g.strokeStyle = 'rgba(255,182,72,0.9)'; g.lineWidth = 4; g.stroke();
+  g.fillStyle = '#ffb648'; g.font = '600 50px "JetBrains Mono", monospace';
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 160, 58);
+  labelTex.needsUpdate = true;
+}
+
+// Bombillo
+const bulb = new THREE.Group();
+bulb.position.set(0.15, 0, 0);
+const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.023, 0.013, 40), new THREE.MeshStandardMaterial({ color: 0x1b1e20, roughness: 0.6 }));
+socket.position.y = 0.0065;
+const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.0095, 0.0095, 0.014, 32), metal);
+screw.position.y = 0.019;
+bulb.add(socket, screw);
+for (let k = 0; k < 4; k++) {
+  const t = new THREE.Mesh(new THREE.TorusGeometry(0.0097, 0.0011, 8, 32), metal);
+  t.rotation.x = Math.PI / 2; t.position.y = 0.0135 + k * 0.0035; bulb.add(t);
+}
+const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, roughness: 0.04, clearcoat: 1, emissive: 0xffc46b, emissiveIntensity: 0, depthWrite: false });
+const glassGeo = new THREE.LatheGeometry([[0.0001, 0.026], [0.009, 0.026], [0.0105, 0.031], [0.016, 0.039], [0.0205, 0.049], [0.021, 0.056], [0.0185, 0.065], [0.012, 0.0715], [0.0001, 0.0735]].map(([r, y]) => new THREE.Vector2(r, y)), 48);
+const glass = new THREE.Mesh(glassGeo, glassMat); glass.renderOrder = 3;
+bulb.add(glass);
+const filMat = new THREE.MeshStandardMaterial({ color: 0x5a4a3a, emissive: 0xff6a1a, emissiveIntensity: 0, roughness: 0.6 });
+for (const x of [-0.0045, 0.0045]) {
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.0005, 0.0005, 0.024, 8), metal);
+  post.position.set(x, 0.039, 0); bulb.add(post);
+}
+class Coil extends THREE.Curve {
+  getPoint(t, out = new THREE.Vector3()) {
+    const a = t * Math.PI * 2 * 9;
+    return out.set(-0.0045 + 0.009 * t, 0.051 + 0.0012 * Math.sin(a), 0.0012 * Math.cos(a));
+  }
+}
+bulb.add(new THREE.Mesh(new THREE.TubeGeometry(new Coil(), 160, 0.00045, 6, false), filMat));
+const bulbLight = new THREE.PointLight(0xffc06a, 0, 0.8, 2);
+bulbLight.position.set(0, 0.052, 0); bulb.add(bulbLight);
+const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: radialTexture([[0, 'rgba(255,240,200,1)'], [0.2, 'rgba(255,200,110,0.6)'], [0.5, 'rgba(255,150,50,0.15)'], [1, 'rgba(255,120,30,0)']]),
+  blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
+glow.position.set(0, 0.051, 0); glow.renderOrder = 4; bulb.add(glow);
+circuit.add(bulb);
+
+// Electrones
+const MAXE = 170;
+const electrons = new THREE.InstancedMesh(new THREE.SphereGeometry(0.0027, 12, 8), new THREE.MeshBasicMaterial({ color: 0x2fb4ff, toneMapped: false }), MAXE);
+electrons.frustumCulled = false; electrons.renderOrder = 1;
+circuit.add(electrons);
+const tmpV = new THREE.Vector3(), tmpM = new THREE.Matrix4(), ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+let phase = 0;
+
+/* ---------- Retícula de búsqueda de superficie (RA) ---------- */
+const reticle = new THREE.Group();
+reticle.matrixAutoUpdate = false; reticle.visible = false;
+const ring = new THREE.Mesh(new THREE.RingGeometry(0.035, 0.045, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x6fdc9a }));
+const footprintPts = [[-0.19, -0.13], [0.19, -0.13], [0.19, 0.13], [-0.19, 0.13], [-0.19, -0.13]].map(([x, z]) => new THREE.Vector3(x, 0.001, z));
+const footprint = new THREE.Line(new THREE.BufferGeometry().setFromPoints(footprintPts), new THREE.LineBasicMaterial({ color: 0x6fdc9a, transparent: true, opacity: 0.7 }));
+reticle.add(ring, footprint);
+scene.add(reticle);
+
+/* ---------- UI ---------- */
+const vSlider = $('vSlider'), rSlider = $('rSlider');
+function sliderFill(el) { el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min) * 100) + '%'); }
+function sci(n) {
+  const e = Math.floor(Math.log10(n)), m = n / 10 ** e;
+  return `${m.toFixed(2)} × 10<sup>${e}</sup>`;
+}
+let lastLabel = '';
+function update() {
+  state.V = +vSlider.value; state.R = +rSlider.value;
+  const I = state.V / (state.R + RB);
+  const norm = Math.log(I / IMIN) / Math.log(IMAX / IMIN);
+  const P_b = I * I * RB;
+  state.I = I;
+  state.speed = 0.006 + 0.13 * Math.pow(I / IMAX, 0.75);       // m/s representativos, crecen con I
+  state.count = Math.round(22 + (MAXE - 22) * norm);            // densidad de electrones visibles
+  state.bright = THREE.MathUtils.clamp(Math.log10(P_b / 0.01) / Math.log10(PMAX / 0.01), 0, 1);
+
+  $('vOut').textContent = state.V.toFixed(1) + ' V';
+  $('rOut').textContent = state.R.toFixed(1) + ' Ω';
+  $('iOut').textContent = I >= 1 ? I.toFixed(2) + ' A' : (I * 1000).toFixed(I < 0.1 ? 1 : 0) + ' mA';
+  $('mSpeed').style.width = ((state.speed - 0.006) / 0.13 * 100).toFixed(1) + '%';
+  $('mFlow').style.width = (norm * 100).toFixed(1) + '%';
+  $('mBright').style.width = (state.bright * 100).toFixed(1) + '%';
+  $('flux').innerHTML = `Pasan <b>${sci(I / E_CHARGE)}</b> electrones por segundo por cualquier punto del circuito.`;
+  sliderFill(vSlider); sliderFill(rSlider);
+
+  setBands(state.R);
+  const txt = (state.R < 10 ? state.R.toFixed(1) : state.R.toFixed(0)) + ' Ω';
+  if (txt !== lastLabel) { drawLabel(txt); lastLabel = txt; }
+
+  const b = state.bright;
+  filMat.emissive.setRGB(1, 0.35 + 0.6 * b, 0.1 + 0.6 * b * b);
+  filMat.emissiveIntensity = b < 0.02 ? 0 : 0.4 + 5 * b;
+  glassMat.emissiveIntensity = 0.9 * b * b;
+  bulbLight.intensity = 0.06 * b * b;
+  glow.material.opacity = Math.min(1, b * 1.2);
+  const gs = 0.02 + 0.13 * b; glow.scale.set(gs, gs, 1);
+}
+vSlider.addEventListener('input', update);
+rSlider.addEventListener('input', update);
+document.fonts?.ready.then(() => { lastLabel = ''; update(); });
+
+$('collapseBtn').addEventListener('click', () => {
+  const panel = $('panel'); const c = panel.classList.toggle('collapsed');
+  $('collapseBtn').textContent = c ? 'Mostrar' : 'Ocultar';
+  $('collapseBtn').setAttribute('aria-expanded', String(!c));
+});
+
+function setStatus(text, st) { $('statusText').textContent = text; $('status').dataset.state = st; }
+
+/* ---------- Vista 3D ---------- */
+function frame3D() {
+  const portrait = window.innerWidth < window.innerHeight;
+  const d = portrait ? 0.78 : 0.5;
+  camera.position.set(0, d * 0.75, d * 0.85);
+  controls.target.set(0, portrait ? -0.07 : -0.02, 0);
+  controls.update();
+}
+frame3D();
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ---------- Realidad aumentada ----------
+   Modo 1 (Android / Chrome): WebXR con hit-test, detección real de superficies.
+   Modo 2 (iPhone / iPad y navegadores sin WebXR): vídeo de la cámara de fondo + giroscopio,
+   la superficie se estima con la inclinación del teléfono. */
+let xrSession = null, hitSource = null, refSpace = null, placed = false;
+let xrSupported = false, camMode = false, camStream = null, orientData = null, orientOK = false;
+const arBtn = $('arBtn'), resetBtn = $('resetBtn'), exitBtn = $('exitBtn'), placeBtn = $('placeBtn');
+const video = $('camVideo');
+
+for (const el of [$('panel'), $('topControls')]) el.addEventListener('beforexrselect', (e) => e.preventDefault());
+
+function camErrorText(err) {
+  const n = err && err.name;
+  const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (n === 'NotAllowedError' || n === 'SecurityError') {
+    return ios ? 'Permiso de cámara denegado. Actívalo en Ajustes › Safari › Cámara (o en «aA» › Ajustes del sitio) y pulsa de nuevo.'
+               : 'Permiso de cámara denegado. Actívalo en el candado de la barra de direcciones y pulsa de nuevo.';
+  }
+  if (n === 'NotFoundError' || n === 'OverconstrainedError') return 'No se encontró ninguna cámara en este dispositivo.';
+  if (n === 'NotReadableError') return 'La cámara está en uso por otra app. Ciérrala e inténtalo de nuevo.';
+  return 'No se pudo abrir la cámara' + (err && err.message ? ': ' + err.message : '.');
+}
+
+/* Pide permiso de cámara al navegador. Se llama al cargar la página y otra vez desde el botón. */
+async function requestCamera() {
+  if (!window.isSecureContext) { setStatus('La cámara solo funciona con HTTPS. Abre el sitio desde un enlace https://', 'idle'); return null; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setStatus('Este navegador no permite usar la cámara.', 'idle'); return null; }
+  if (camStream && camStream.active) return camStream;
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    return camStream;
+  } catch (err) {
+    camStream = null; setStatus(camErrorText(err), 'idle'); return null;
+  }
+}
+function stopCamera() { camStream?.getTracks().forEach((t) => t.stop()); camStream = null; video.srcObject = null; }
+
+async function initAR() {
+  try { xrSupported = !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch (e) { xrSupported = false; }
+  arBtn.disabled = false; arBtn.textContent = 'Iniciar realidad aumentada';
+  setStatus('Solicitando acceso a la cámara…', 'search');
+  const stream = await requestCamera();
+  if (!stream) return;
+  if (xrSupported) stopCamera(); // WebXR abre la cámara por su cuenta; el permiso ya queda concedido
+  setStatus('Cámara permitida · pulsa «Iniciar realidad aumentada»', 'found');
+}
+initAR();
+
+arBtn.addEventListener('click', () => { if (xrSupported) startXR(); else startCamAR(); });
+
+/* --- Modo 1: WebXR --- */
+async function startXR() {
+  try {
+    const session = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test'], optionalFeatures: ['dom-overlay', 'local-floor'], domOverlay: { root: $('overlay') },
+    });
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(session);
+    xrSession = session;
+    refSpace = renderer.xr.getReferenceSpace();
+    const viewer = await session.requestReferenceSpace('viewer');
+    hitSource = await session.requestHitTestSource({ space: viewer });
+    session.addEventListener('select', place);
+    session.addEventListener('end', onEnd);
+    enterARLook();
+  } catch (err) {
+    // Si WebXR falla, se usa el modo con cámara
+    xrSupported = false; startCamAR();
+  }
+}
+
+/* --- Modo 2: cámara + giroscopio --- */
+const TABLE_Y = -0.45; // altura estimada del teléfono sobre la superficie (m)
+function onOrient(e) { if (e.alpha !== null || e.beta !== null) { orientData = e; orientOK = true; } }
+async function startCamAR() {
+  // El permiso de sensores en iOS debe pedirse en el mismo toque, antes de cualquier await
+  let orientReq = null;
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    orientReq = DeviceOrientationEvent.requestPermission().catch(() => 'denied');
+  }
+  const camReq = requestCamera();
+  const [orientRes, stream] = await Promise.all([orientReq, camReq]);
+  if (!stream) return;
+  if (orientRes !== 'denied') window.addEventListener('deviceorientation', onOrient);
+  video.srcObject = stream; video.hidden = false;
+  try { await video.play(); } catch (e) { /* iOS reproduce tras el toque */ }
+  camMode = true;
+  camera.position.set(0, 0, 0); camera.quaternion.setFromEuler(new THREE.Euler(-0.75, 0, 0));
+  camera.fov = 60; camera.updateProjectionMatrix();
+  enterARLook();
+}
+
+function enterARLook() {
+  scene.background = null; floor.visible = false; controls.enabled = false;
+  arBtn.hidden = true; exitBtn.hidden = false;
+  startSearch();
+}
+
+function startSearch() {
+  placed = false; circuit.visible = false; reticle.visible = false;
+  resetBtn.hidden = true; placeBtn.hidden = true;
+  setStatus(camMode ? 'Buscando superficie… apunta la cámara hacia la mesa o el piso' : 'Buscando superficie… mueve el teléfono despacio sobre una mesa o el piso', 'search');
+}
+const camPos = new THREE.Vector3(), hitPos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+function place() {
+  if (placed || !reticle.visible) return;
+  reticle.matrix.decompose(hitPos, q, sc);
+  if (camMode) camPos.copy(camera.position); else camPos.setFromMatrixPosition(renderer.xr.getCamera().matrixWorld);
+  circuit.position.copy(hitPos);
+  circuit.rotation.set(0, Math.atan2(camPos.x - hitPos.x, camPos.z - hitPos.z), 0);
+  circuit.visible = true; reticle.visible = false; placed = true;
+  placeBtn.hidden = true; resetBtn.hidden = false;
+  setStatus('Circuito colocado · cambia el voltaje y la resistencia', 'placed');
+}
+placeBtn.addEventListener('click', place);
+resetBtn.addEventListener('click', startSearch);
+canvas.addEventListener('click', () => { if (camMode) place(); });
+exitBtn.addEventListener('click', () => { if (xrSession) xrSession.end(); else if (camMode) onEnd(); });
+
+function onEnd() {
+  hitSource?.cancel?.(); hitSource = null; xrSession = null;
+  if (camMode) {
+    camMode = false; window.removeEventListener('deviceorientation', onOrient);
+    video.hidden = true; stopCamera();
+    camera.fov = 45; camera.updateProjectionMatrix();
+  }
+  scene.background = BG; floor.visible = true; controls.enabled = true;
+  circuit.position.set(0, 0, 0); circuit.rotation.set(0, 0, 0); circuit.visible = true; reticle.visible = false;
+  arBtn.hidden = false; exitBtn.hidden = true; resetBtn.hidden = true; placeBtn.hidden = true;
+  frame3D();
+  setStatus('Vista 3D · pulsa «Iniciar realidad aumentada»', 'idle');
+}
+
+// Orientación del teléfono -> cámara 3D
+const zee = new THREE.Vector3(0, 0, 1), eul = new THREE.Euler(), q0 = new THREE.Quaternion();
+const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+const D2R = Math.PI / 180;
+function applyOrientation() {
+  if (!orientOK) return;
+  const o = orientData;
+  const screenAngle = ((screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0) * D2R;
+  eul.set((o.beta || 0) * D2R, (o.alpha || 0) * D2R, -(o.gamma || 0) * D2R, 'YXZ');
+  camera.quaternion.setFromEuler(eul).multiply(q1).multiply(q0.setFromAxisAngle(zee, -screenAngle));
+}
+const rayDir = new THREE.Vector3(), estPoint = new THREE.Vector3();
+function camSurface() {
+  rayDir.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  if (rayDir.y < -0.25) {
+    const t = (TABLE_Y - camera.position.y) / rayDir.y;
+    if (t < 2.2) { estPoint.copy(camera.position).addScaledVector(rayDir, t); return estPoint; }
+  }
+  return null;
+}
+function setFound(found) {
+  if (found) {
+    if ($('status').dataset.state !== 'found') { setStatus('Superficie encontrada · toca la pantalla para colocar el circuito', 'found'); placeBtn.hidden = false; }
+  } else if (reticle.visible || $('status').dataset.state !== 'search') {
+    reticle.visible = false; placeBtn.hidden = true;
+    setStatus(camMode ? 'Buscando superficie… apunta la cámara hacia la mesa o el piso' : 'Buscando superficie… mueve el teléfono despacio sobre una mesa o el piso', 'search');
+  }
+}
+
+/* ---------- Bucle ---------- */
+const clock = new THREE.Clock();
+renderer.setAnimationLoop((t, xrFrame) => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+
+  if (xrFrame && hitSource && !placed) {
+    const hits = xrFrame.getHitTestResults(hitSource);
+    const pose = hits.length ? hits[0].getPose(refSpace) : null;
+    if (pose) { reticle.matrix.fromArray(pose.transform.matrix); reticle.visible = true; }
+    setFound(!!pose);
+  }
+  if (camMode) {
+    applyOrientation();
+    if (!placed) {
+      const p = camSurface();
+      if (p) { reticle.matrix.makeTranslation(p.x, p.y, p.z); reticle.visible = true; }
+      setFound(!!p);
+    }
+  }
+
+  // Electrones: velocidad ∝ corriente, cantidad visible ∝ intensidad
+  phase += state.speed * dt;
+  const n = state.count, gap = L / n;
+  for (let i = 0; i < MAXE; i++) {
+    if (i < n && !pointAt(phase + i * gap, tmpV)) { tmpM.makeTranslation(tmpV.x, tmpV.y, tmpV.z); electrons.setMatrixAt(i, tmpM); }
+    else electrons.setMatrixAt(i, ZERO);
+  }
+  electrons.instanceMatrix.needsUpdate = true;
+
+  // Parpadeo leve del filamento
+  if (state.bright > 0.02) glow.material.opacity = Math.min(1, state.bright * 1.2) * (0.96 + 0.04 * Math.sin(t * 0.03));
+
+  if (!renderer.xr.isPresenting && !camMode) controls.update();
+  renderer.render(scene, camera);
+});
+update();
+</script>
+</body>
+</html>
